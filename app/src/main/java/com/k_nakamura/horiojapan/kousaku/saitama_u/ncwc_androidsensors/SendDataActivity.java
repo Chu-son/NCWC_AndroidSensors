@@ -12,6 +12,8 @@ import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.os.PowerManager.WakeLock;
 import android.provider.Settings;
 import android.support.v7.app.AppCompatActivity;
 import android.view.Menu;
@@ -34,11 +36,10 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
     //GPS系用の変数
     private SensorManager mSensorManager;
     private LocationManager locationManager;
-    private String text = "searching...\n";
+    private String text = "----GPS----\n";
 
     private int preLatitude;
     private int preLongitude;
-    private int preAccuracy;
 
     private boolean firstdata;
 
@@ -77,12 +78,14 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
 
 
 
-
+/*
     //受信データ関連
     private int responseCounter;    //レスポンスの現在位置の読み込み用
     private byte[] response;
-    private final int buflen = 100; //とりあえず
+    private final int buflen = 100; //とりあえず*/
 
+    PowerManager mPowerManager;
+    WakeLock mWakeLock;
 
 
 
@@ -101,7 +104,6 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
         //変数の初期化
         preLatitude = 0;
         preLongitude = 0;
-        preAccuracy = 0;
         firstdata = true;
 
         //text += "onCreate()\n";
@@ -126,10 +128,16 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
         //text += "onResume()\n";
         //textView.setText(text);
 
+        mPowerManager = (PowerManager)getSystemService(Context.POWER_SERVICE);
+        //SCREEN_DIM_WAKE_LOCK or PARTIAL_WAKE_LOCK
+        mWakeLock = mPowerManager.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "tag");
+        mWakeLock.acquire();
+
         if (locationManager != null) {
             // minTime = 500msec, minDistance = 1m
             //minTime msec 経過するか minDistance m 移動したら更新
             locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 500, 1, this);
+            mDumpTextView.setText("GPSstart");
         }
         else{
             text += "locationManager=null\n";
@@ -200,70 +208,121 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
         super.onPause();
     }
 
+    @Override
+    protected void onDestroy(){
+        super.onDestroy();
 
+        mWakeLock.release();
+
+    }
+
+
+    /*--↓--GPS関連--↓--*/
     @Override
     public void onLocationChanged(Location location) {
 
-        //シリアルポートが開いているかどうかで分岐
-        if(sPort == null){
-            text += "----------\n";
-            text += "Latitude="+ String.valueOf(location.getLatitude())+"\n";
-            text += "Longitude="+ String.valueOf(location.getLongitude())+"\n";
+        //textの表示
+        text += "----------\n";
+        text += "Latitude="+ String.valueOf(location.getLatitude())+"\n";
+        text += "Longitude="+ String.valueOf(location.getLongitude())+"\n";
 
-            // Get the estimated accuracy of this location, in meters.
-            // We define accuracy as the radius of 68% confidence. In other words,
-            // if you draw a circle centered at this location's latitude and longitude,
-            // and with a radius equal to the accuracy, then there is a 68% probability
-            // that the true location is inside the circle.
-            text += "Accuracy="+ String.valueOf(location.getAccuracy())+"\n";
+        // Get the estimated accuracy of this location, in meters.
+        // We define accuracy as the radius of 68% confidence. In other words,
+        // if you draw a circle centered at this location's latitude and longitude,
+        // and with a radius equal to the accuracy, then there is a 68% probability
+        // that the true location is inside the circle.
+        text += "Accuracy="+ String.valueOf(location.getAccuracy())+"\n";
 
-            text += "Altitude="+ String.valueOf(location.getAltitude())+"\n";
-            text += "Time="+ String.valueOf(location.getTime())+"\n";
-            text += "Speed="+ String.valueOf(location.getSpeed())+"\n";
+        //text += "Altitude="+ String.valueOf(location.getAltitude())+"\n";
+        //text += "Time="+ String.valueOf(location.getTime())+"\n";
+        //text += "Speed="+ String.valueOf(location.getSpeed())+"\n";
 
-            // Get the bearing, in degrees.
-            // Bearing is the horizontal direction of travel of this device,
-            // and is not related to the device orientation.
-            // It is guaranteed to be in the range (0.0, 360.0] if the device has a bearing.
-            text += "Bearing="+ String.valueOf(location.getBearing())+"\n";
-            text += "----------\n";
+        // Get the bearing, in degrees.
+        // Bearing is the horizontal direction of travel of this device,
+        // and is not related to the device orientation.
+        // It is guaranteed to be in the range (0.0, 360.0] if the device has a bearing.
+        //text += "Bearing="+ String.valueOf(location.getBearing())+"\n";
+        text += "----------\n";
 
-            TextView t = (TextView) findViewById(R.id.consoleText);
-            t.setText(text);
-        }
+        mDumpTextView.setText(text);
+
         //Portが開いているとき
-        else {
+        if(sPort != null){
             if (firstdata) {
-                preLatitude = (int) (location.getLatitude() * 100000);
-                preLongitude = (int) (location.getLongitude() * 100000);
-                preAccuracy = (int) (location.getAccuracy() * 100000);
-                byte[] senddata = new byte[6];
-                senddata[0] = (byte) ((int) (preLatitude * 100000) << 8);
-                senddata[1] = (byte) ((int) (preLatitude * 100000));
-                senddata[2] = (byte) ((int) (preLongitude * 100000) << 8);
-                senddata[3] = (byte) ((int) (preLongitude * 100000));
-                senddata[4] = (byte) ((int) (preAccuracy * 10) << 8);
-                senddata[5] = (byte) ((int) (preAccuracy * 10));
+                //初期値を記録
+                preLatitude = (int) (location.getLatitude() * 1000000);
+                preLongitude = (int) (location.getLongitude() * 1000000);
+                int Accuracy = (int) (location.getAccuracy() * 10);
 
+                //送信用バッファ作成
+                byte[] senddata = new byte[11];
+                senddata[0] = (byte) 3;
+                senddata[1] = (byte) (preLatitude >> 24);
+                senddata[2] = (byte) (preLatitude >> 16);
+                senddata[3] = (byte) (preLatitude >> 8);
+                senddata[4] = (byte) (preLatitude);
+                senddata[5] = (byte) (preLongitude >> 24);
+                senddata[6] = (byte) (preLongitude >> 16);
+                senddata[7] = (byte) (preLongitude >> 8);
+                senddata[8] = (byte) (preLongitude);
+                senddata[9] = (byte) (Accuracy >> 8);
+                senddata[10] = (byte) (Accuracy);
+
+                //データ送信
                 try {
                     sPort.write(senddata, 5000);
                     mTitleTextView.setText("First writed\n");
+                    text += "first write \n";
+                    mDumpTextView.setText(text);
                 } catch (IOException e) {
                     mTitleTextView.setText("Can't write\n");
                 }
+
+                //firstdata = !firstdata;
+
             } else {
+                //符号の記録用
+                int signs = 0;
 
-                byte[] senddata = new byte[6];
-                senddata[0] = (byte) ((int) (preLatitude - location.getLatitude() * 100000) << 8);
-                senddata[1] = (byte) ((int) (preLatitude - location.getLatitude() * 100000));
-                senddata[2] = (byte) ((int) (preLongitude - location.getLongitude() * 100000) << 8);
-                senddata[3] = (byte) ((int) (preLongitude - location.getLongitude() * 100000));
-                senddata[4] = (byte) ((int) (preAccuracy - location.getAccuracy() * 10) << 8);
-                senddata[5] = (byte) ((int) (preAccuracy - location.getAccuracy() * 10));
+                //緯度・経度・精度の変化量をintで下6桁分取得
+                int dLatitude = (int)(location.getLatitude() * 1000000 - preLatitude);
+                int dLongitude = (int)(location.getLongitude() * 1000000 - preLongitude);
+                int Accuracy = (int)(location.getAccuracy() * 10);
 
+                //負の値を送ると受信側が面倒なので，
+                //各値が負ならsignsに記録して正にしておく
+                if(dLatitude < 0){
+                    signs = signs | 0b1;
+                    dLatitude = -dLatitude;
+                }
+                if(dLongitude < 0){
+                    signs = signs | 0b10;
+                    dLongitude = -dLongitude;
+                }
+
+                //値の更新
+                preLatitude = (int) (location.getLatitude() * 1000000);
+                preLongitude = (int) (location.getLongitude() * 1000000);
+
+                //送信用バッファ作成
+                byte[] senddata = new byte[11];
+                senddata[0] = (byte)1;
+                senddata[1] = (byte) ( dLatitude >> 16 );
+                senddata[2] = (byte) ( dLatitude >> 8 );
+                senddata[3] = (byte) ( dLatitude );
+                senddata[4] = (byte) ( dLongitude >> 16 );
+                senddata[5] = (byte) ( dLongitude >> 8 );
+                senddata[6] = (byte) ( dLongitude );
+                senddata[7] = (byte) ( Accuracy >> 8 );
+                senddata[8] = (byte) ( Accuracy );
+                senddata[9] = (byte)  signs;
+
+                //データ送信
                 try {
                     sPort.write(senddata, 5000);
                     mTitleTextView.setText("Writed\n");
+                    text += "writed \n";
+                    mDumpTextView.setText(text);
                 } catch (IOException e) {
                     mTitleTextView.setText("Can't write\n");
                 }
@@ -303,8 +362,10 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
         Intent settingsIntent = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);
         startActivity(settingsIntent);
     }
+    /*--↑--GPS関連--↑--*/
 
 
+    /*--↓――方位関連--↓--*/
     @Override
     public void onSensorChanged(SensorEvent event) {
         // 精度の低いデータは捨てる
@@ -322,17 +383,18 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
         // 両方のデータが揃ったら計算を行う
         if (mGeomagnetic != null && mAcceleration != null) {
             float[] inR = new float[9];
-            float[] outR = new float[9];
+            //float[] outR = new float[9];
             float[] mOrientation = new float[3];
             SensorManager.getRotationMatrix(inR, null, mAcceleration, mGeomagnetic);
             // Activityの表示が縦固定で、端末表面が自分を向いている場合
-            SensorManager.remapCoordinateSystem(inR, SensorManager.AXIS_X, SensorManager.AXIS_Z, outR);
-            SensorManager.getOrientation(outR, mOrientation);
+            //SensorManager.remapCoordinateSystem(inR, SensorManager.AXIS_X, SensorManager.AXIS_Z, outR);
+            //SensorManager.getOrientation(outR, mOrientation);
+            SensorManager.getOrientation(inR, mOrientation);
+
             // radianToDegree(mOrientation[0]) Z軸方向, Azimuth
             // radianToDegree(mOrientation[1]) X軸方向, Pitch
             // radianToDegree(mOrientation[2]) Y軸方向, Roll
 
-            if(sPort == null) {
                 String buf =
                         "---------- Orientation --------\n" +
                                 String.format("Azimuth\n\t%.2f\n", rad2deg(mOrientation[0])) +
@@ -341,9 +403,27 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
                 TextView t = (TextView) findViewById(R.id.orientationView);
                 t.setText(buf);
 
-                mGeomagnetic = null;
-                mAcceleration = null;
+            if(sPort != null) {
+                byte[] orientationData = new byte[11];
+                orientationData[0] = (byte) 2;
+                orientationData[1] = (byte) ((int) ((rad2deg(mOrientation[0]) + 180)* 100) >> 8);
+                orientationData[2] = (byte) ((int) (rad2deg(mOrientation[0]) + 180)* 100);
+                orientationData[3] = (byte) ((int) ((rad2deg(mOrientation[1]) + 180)* 100) >> 8);
+                orientationData[4] = (byte) ((int) (rad2deg(mOrientation[0]) + 180)* 100);
+                orientationData[5] = (byte) ((int) ((rad2deg(mOrientation[2]) + 180)* 100) >> 8);
+                orientationData[6] = (byte) ((int) (rad2deg(mOrientation[0]) + 180)* 100);
+
+                try {
+                    sPort.write(orientationData, 5000);
+                    mTitleTextView.setText("Writed\n");
+                } catch (IOException e) {
+                    mTitleTextView.setText("Can't write\n");
+                }
             }
+
+            mGeomagnetic = null;
+            mAcceleration = null;
+
         }
     }
 
@@ -355,7 +435,7 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
     private float rad2deg( float rad ) {
         return rad * (float) 180.0 / (float) Math.PI;
     }
-
+    /*--↑――方位関連--↑--*/
 
     /**
      * ドライバの取得
@@ -368,7 +448,7 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
         textView.setText(text);
     }*/
 
-    private void sendData(){
+    //private void sendData(){
         /*
         try{
             if(usb == null){
@@ -427,7 +507,7 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
             //tvMsg.setText("送信処理で入出力エラーが発生しました。" + e.getMessage());
         }
         */
-    }
+    //}
 
 
     private void stopIoManager() {
