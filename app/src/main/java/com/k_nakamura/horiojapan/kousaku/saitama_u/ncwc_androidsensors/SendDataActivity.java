@@ -43,6 +43,7 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
 
     private boolean firstdata;
 
+    // Viewの変数
     private TextView mTitleTextView;
     private TextView mDumpTextView;
     private ScrollView mScrollView;
@@ -50,6 +51,9 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
     //角度取得系用の変数
     private float[] mAcceleration;
     private float[] mGeomagnetic;
+
+    private float[] mLowpassAttitude = {0,0,0};
+    private float   SmoothingCoefficient = 0.05f;
 
     //通信関連
     private static UsbSerialPort sPort = null;
@@ -76,14 +80,7 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
                 }
             };
 
-
-
-/*
-    //受信データ関連
-    private int responseCounter;    //レスポンスの現在位置の読み込み用
-    private byte[] response;
-    private final int buflen = 100; //とりあえず*/
-
+    // スリープにならないようにするやつ関連
     PowerManager mPowerManager;
     WakeLock mWakeLock;
 
@@ -93,6 +90,7 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.serial_console);
+
         mTitleTextView = (TextView) findViewById(R.id.demoTitle);
         mDumpTextView = (TextView) findViewById(R.id.consoleText);
         mScrollView = (ScrollView) findViewById(R.id.demoScroller);
@@ -105,9 +103,6 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
         preLatitude = 0;
         preLongitude = 0;
         firstdata = true;
-
-        //text += "onCreate()\n";
-        //status_view.setText(text);
 
         // LocationManager インスタンス生成
         locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
@@ -124,9 +119,6 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
     @Override
     protected void onResume() {
         super.onResume();
-
-        //text += "onResume()\n";
-        //textView.setText(text);
 
         mPowerManager = (PowerManager)getSystemService(Context.POWER_SERVICE);
         //SCREEN_DIM_WAKE_LOCK or PARTIAL_WAKE_LOCK
@@ -157,10 +149,13 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
         }
 
 
-        //sendData();
-        if (sPort == null) {
+        // シリアルポートを開く
+        if (sPort == null)
+        {
             mTitleTextView.setText("No serial device.");
-        } else {
+        }
+        else
+        {
             final UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
 
             UsbDeviceConnection connection = usbManager.openDevice(sPort.getDriver().getDevice());
@@ -185,20 +180,16 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
             }
             mTitleTextView.setText("Serial device: " + sPort.getClass().getSimpleName());
         }
+        // SerialIOManagerを設定する．データ取得イベントとかをやってくれるやつだと思われ．
         onDeviceStateChange();
 
     }
 
     @Override
     protected void onPause() {
-
+        // センサーやらGPSやらを止める
         if (locationManager != null) {
-            // update を止める
             locationManager.removeUpdates(this);
-        }
-        else{
-            text += "onPause()\n";
-            //textView.setText(text);
         }
 
         if( mSensorManager != null){
@@ -211,7 +202,7 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
     @Override
     protected void onDestroy(){
         super.onDestroy();
-
+        // 画面が消えないようにするやつを止める
         mWakeLock.release();
 
     }
@@ -247,7 +238,7 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
         mDumpTextView.setText(text);
 
         //Portが開いているとき
-        if(sPort != null){
+        if(sPort != null && false){
             if (firstdata) {
                 //初期値を記録
                 preLatitude = (int) (location.getLatitude() * 1000000);
@@ -358,6 +349,7 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
         }*/
     }
 
+    // GPSを有効にする画面を表示
     private void enableLocationSettings() {
         Intent settingsIntent = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);
         startActivity(settingsIntent);
@@ -389,21 +381,27 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
             // Activityの表示が縦固定で、端末表面が自分を向いている場合
             //SensorManager.remapCoordinateSystem(inR, SensorManager.AXIS_X, SensorManager.AXIS_Z, outR);
             //SensorManager.getOrientation(outR, mOrientation);
+            // 今回は基準姿勢デフォルトでOK
             SensorManager.getOrientation(inR, mOrientation);
 
-            // radianToDegree(mOrientation[0]) Z軸方向, Azimuth
-            // radianToDegree(mOrientation[1]) X軸方向, Pitch
-            // radianToDegree(mOrientation[2]) Y軸方向, Roll
+            for (int i = 0 ; i < 3 ; i++)
+            {
+                mLowpassAttitude[i] = mOrientation[i] * SmoothingCoefficient + mLowpassAttitude[i] * (1.0f - SmoothingCoefficient);
+            }
+            // Z軸方向Azimuth, X軸方向Pitch, Y軸方向Roll
+            String buf =
+                    "---------- Orientation --------\n" +
+                            String.format("Azimuth\n\t%.2f\n", rad2deg(mOrientation[0])) +
+                            String.format("Pitch\n\t%.2f\n", rad2deg(mOrientation[1])) +
+                            String.format("Roll\n\t%.2f\n", rad2deg(mOrientation[2])) +
+                    "---------- Lowpass Orientation --------\n" +
+                            String.format("Azimuth\n\t%.2f\n", rad2deg(mLowpassAttitude[0])) +
+                            String.format("Pitch\n\t%.2f\n", rad2deg(mLowpassAttitude[1])) +
+                            String.format("Roll\n\t%.2f\n", rad2deg(mLowpassAttitude[2]));
+            TextView t = (TextView) findViewById(R.id.orientationView);
+            t.setText(buf);
 
-                String buf =
-                        "---------- Orientation --------\n" +
-                                String.format("Azimuth\n\t%.2f\n", rad2deg(mOrientation[0])) +
-                                String.format("Pitch\n\t%.2f\n", rad2deg(mOrientation[1])) +
-                                String.format("Roll\n\t%.2f\n", rad2deg(mOrientation[2]));
-                TextView t = (TextView) findViewById(R.id.orientationView);
-                t.setText(buf);
-
-            if(sPort != null) {
+            if(sPort != null && false) {
                 byte[] orientationData = new byte[11];
                 orientationData[0] = (byte) 2;
                 orientationData[1] = (byte) ((int) ((rad2deg(mOrientation[0]) + 180)* 100) >> 8);
@@ -545,11 +543,17 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
     }
 
     private void updateReceivedData(byte[] data) {
-        final String message = "Read " + data.length + " bytes: \n"
-                + HexDump.dumpHexString(data) + "\n\n";
+        String message = "Read " + data.length + " bytes: \n";
+              //  + HexDump.dumpHexString(data) + "\n\n";
+        if(data[0] == '1') message += "unko\n";
+        else message += "no unko\n";
+        message += new String(data) + "\n";
+        message += String.valueOf(data[0]) + "\n";
+
         mDumpTextView.append(message);
-        mScrollView.smoothScrollTo(0, mDumpTextView.getBottom());
+        //mScrollView.smoothScrollTo(0, mDumpTextView.getBottom());
     }
+
 
     //画面遷移用のメソッド
     static void show(Context context, UsbSerialPort port) {
