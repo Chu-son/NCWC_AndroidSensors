@@ -36,12 +36,14 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
     //GPS系用の変数
     private SensorManager mSensorManager;
     private LocationManager locationManager;
-    private String text = "----GPS----\n";
+    private String text = "----Log----\n";
 
     private int preLatitude;
     private int preLongitude;
 
     private boolean firstdata;
+
+    private int gpsSendDataArray[] = {0,0,0,};
 
     // Viewの変数
     private TextView mTitleTextView;
@@ -53,7 +55,9 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
     private float[] mGeomagnetic;
 
     private float[] mLowpassAttitude = {0,0,0};
-    private float   SmoothingCoefficient = 0.05f;
+
+    private int orientationSendDataArray[] = {0,0,0,};
+
 
     //通信関連
     private static UsbSerialPort sPort = null;
@@ -166,7 +170,7 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
 
             try {
                 sPort.open(connection);
-                sPort.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+                sPort.setParameters(9600, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
             } catch (IOException e) {
                 //Log.e(TAG, "Error setting up device: " + e.getMessage(), e);
                 mTitleTextView.setText("Error opening device: " + e.getMessage());
@@ -238,8 +242,10 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
         mDumpTextView.setText(text);
 
         //Portが開いているとき
-        if(sPort != null && false){
+        if(sPort != null){
             if (firstdata) {
+                //送るやつ
+                /*
                 //初期値を記録
                 preLatitude = (int) (location.getLatitude() * 1000000);
                 preLongitude = (int) (location.getLongitude() * 1000000);
@@ -268,6 +274,12 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
                 } catch (IOException e) {
                     mTitleTextView.setText("Can't write\n");
                 }
+                */
+
+                // データを送信用変数に格納
+                gpsSendDataArray[0] = (int) (location.getLatitude() * 1000000);
+                gpsSendDataArray[1] = (int) (location.getLongitude() * 1000000);
+                gpsSendDataArray[2] = (int) (location.getAccuracy() * 10);
 
                 //firstdata = !firstdata;
 
@@ -322,6 +334,31 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
 
 
     }
+    public void sendGPSdata(){
+        //送信用バッファ作成
+        byte[] senddata = new byte[11];
+        senddata[0] = (byte) 3;
+        senddata[1] = (byte) (gpsSendDataArray[0] >> 24);
+        senddata[2] = (byte) (gpsSendDataArray[0] >> 16);
+        senddata[3] = (byte) (gpsSendDataArray[0] >> 8);
+        senddata[4] = (byte) (gpsSendDataArray[0]);
+        senddata[5] = (byte) (gpsSendDataArray[1] >> 24);
+        senddata[6] = (byte) (gpsSendDataArray[1] >> 16);
+        senddata[7] = (byte) (gpsSendDataArray[1] >> 8);
+        senddata[8] = (byte) (gpsSendDataArray[1]);
+        senddata[9] = (byte) (gpsSendDataArray[2] >> 8);
+        senddata[10] = (byte) (gpsSendDataArray[2]);
+
+        //データ送信
+        try {
+            sPort.write(senddata, 5000);
+            mTitleTextView.setText("GPS writed\n");
+            text += "GPS write \n";
+            mDumpTextView.setText(text);
+        } catch (IOException e) {
+            mTitleTextView.setText("Can't write\n");
+        }
+    }
 
     @Override
     public void onProviderDisabled(String provider) {
@@ -374,6 +411,8 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
         }
         // 両方のデータが揃ったら計算を行う
         if (mGeomagnetic != null && mAcceleration != null) {
+            float   SmoothingCoefficient = 0.1f;
+
             float[] inR = new float[9];
             //float[] outR = new float[9];
             float[] mOrientation = new float[3];
@@ -401,15 +440,36 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
             TextView t = (TextView) findViewById(R.id.orientationView);
             t.setText(buf);
 
-            if(sPort != null && false) {
-                byte[] orientationData = new byte[11];
+            if(sPort != null) {
+                //byte[] orientationData = new byte[7];
+                float[] senddata = {rad2deg(mLowpassAttitude[0]),rad2deg(mLowpassAttitude[1]),rad2deg(mLowpassAttitude[2])};
+
+                for(int i = 0 ; i < 3 ; i++)
+                {
+                    senddata[i] += 180f;
+                    senddata[i] *= 100f;
+                    orientationSendDataArray[i] = (int)senddata[i];
+                }
+
+
+                /*
                 orientationData[0] = (byte) 2;
-                orientationData[1] = (byte) ((int) ((rad2deg(mOrientation[0]) + 180)* 100) >> 8);
-                orientationData[2] = (byte) ((int) (rad2deg(mOrientation[0]) + 180)* 100);
-                orientationData[3] = (byte) ((int) ((rad2deg(mOrientation[1]) + 180)* 100) >> 8);
-                orientationData[4] = (byte) ((int) (rad2deg(mOrientation[0]) + 180)* 100);
-                orientationData[5] = (byte) ((int) ((rad2deg(mOrientation[2]) + 180)* 100) >> 8);
-                orientationData[6] = (byte) ((int) (rad2deg(mOrientation[0]) + 180)* 100);
+                orientationData[1] = (byte) ((int) senddata[0] >> 8);
+                orientationData[2] = (byte) ((int) senddata[0]);
+                orientationData[3] = (byte) ((int) senddata[1] >> 8);
+                orientationData[4] = (byte) ((int) senddata[1]);
+                orientationData[5] = (byte) ((int) senddata[2] >> 8);
+                orientationData[6] = (byte) ((int) senddata[2]);
+
+                ///*
+                orientationData[0] = (byte) 2;
+                orientationData[1] = (byte) ((int) ((rad2deg(mLowpassAttitude[0]) + 180)* 100) >> 8);
+                orientationData[2] = (byte) ((int) (rad2deg(mLowpassAttitude[0]) + 180)* 100);
+                orientationData[3] = (byte) ((int) ((rad2deg(mLowpassAttitude[1]) + 180)* 100) >> 8);
+                orientationData[4] = (byte) ((int) (rad2deg(mLowpassAttitude[1]) + 180)* 100);
+                orientationData[5] = (byte) ((int) ((rad2deg(mLowpassAttitude[2]) + 180)* 100) >> 8);
+                orientationData[6] = (byte) ((int) (rad2deg(mLowpassAttitude[2]) + 180)* 100);
+
 
                 try {
                     sPort.write(orientationData, 5000);
@@ -417,12 +477,34 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
                 } catch (IOException e) {
                     mTitleTextView.setText("Can't write\n");
                 }
+                */
             }
 
             mGeomagnetic = null;
             mAcceleration = null;
 
         }
+    }
+
+    private void sendOrientationData()
+    {
+        byte[] orientationData = new byte[7];
+
+        orientationData[0] = (byte) 2;
+        orientationData[1] = (byte) (orientationSendDataArray[0] >> 8);
+        orientationData[2] = (byte) (orientationSendDataArray[0]);
+        orientationData[3] = (byte) (orientationSendDataArray[1] >> 8);
+        orientationData[4] = (byte) (orientationSendDataArray[1]);
+        orientationData[5] = (byte) (orientationSendDataArray[2] >> 8);
+        orientationData[6] = (byte) (orientationSendDataArray[2]);
+
+        try {
+            sPort.write(orientationData, 5000);
+            mTitleTextView.setText("Orientation writed\n");
+        } catch (IOException e) {
+            mTitleTextView.setText("Can't write\n");
+        }
+
     }
 
     @Override
@@ -433,84 +515,11 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
     private float rad2deg( float rad ) {
         return rad * (float) 180.0 / (float) Math.PI;
     }
+
     /*--↑――方位関連--↑--*/
-
-    /**
-     * ドライバの取得
-
-    private void getUsbDriver(){
-        UsbManager manager = (UsbManager) getSystemService(Context.USB_SERVICE);
-        usb = UsbSerialProber.acquire(manager);
-
-        text += "getUsbDriver\n";
-        textView.setText(text);
-    }*/
-
-    //private void sendData(){
-        /*
-        try{
-            if(usb == null){
-                getUsbDriver();
-                text += "usb null\n";
-                textView.setText(text);
-            }
-        }
-        catch(Exception e){
-            //tvMsg.setText("ケーブルを再度接続して下さい。");
-            //btnGetTemp.setEnabled(false);
-            return;
-        }
-        text += "beforesenddata\n";
-        textView.setText(text);
-
-        if (usb == null) {
-            //tvMsg.setText("ケーブルが認識出来ません。");
-            text += "can't send\n";
-            textView.setText(text);
-            return;
-        }
-
-        //接続の開始
-        try{
-            response = null;
-            response = new byte[buflen];
-
-            usb.open();
-            usb.setBaudRate(9600);
-
-            serialIoManager = new SerialInputOutputManager(usb, mListener);
-            executor.submit(serialIoManager);
-
-
-            try {
-                String cmd = "t";
-                usb.write(cmd.getBytes(), 10000);
-                text += "senddata\n";
-                textView.setText(text);
-
-            } catch (Exception e) {
-                //tvMsg.setText("送信処理でエラーが発生しました。" + e.getMessage());
-
-                serialIoManager.stop();
-                serialIoManager = null;
-
-                try {
-                    usb.close();
-                    usb = null;
-                } catch (IOException ex) {
-                }
-            }
-        }
-        catch(IOException e){
-            //tvMsg.setText("送信処理で入出力エラーが発生しました。" + e.getMessage());
-        }
-        */
-    //}
-
 
     private void stopIoManager() {
         if (mSerialIoManager != null) {
-            //Log.i(TAG, "Stopping io manager ..");
             mSerialIoManager.stop();
             mSerialIoManager = null;
         }
@@ -518,21 +527,7 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
 
     private void startIoManager() {
         if (sPort != null) {
-            //Log.i(TAG, "Starting io manager ..");
             mSerialIoManager = new SerialInputOutputManager(sPort, mListener);
-            byte[] testword = new byte[5];
-            testword[0] = 'g';
-            testword[1] = 'p';
-            testword[2] = 's';
-
-            try {
-                sPort.write(testword, 5000);
-                mTitleTextView.setText("Writed\n" );
-            }
-            catch (IOException e)
-            {
-                mTitleTextView.setText("Can't write\n" );
-            }
             mExecutor.submit(mSerialIoManager);
         }
     }
@@ -543,15 +538,17 @@ public class SendDataActivity extends AppCompatActivity implements LocationListe
     }
 
     private void updateReceivedData(byte[] data) {
-        String message = "Read " + data.length + " bytes: \n";
-              //  + HexDump.dumpHexString(data) + "\n\n";
-        if(data[0] == '1') message += "unko\n";
-        else message += "no unko\n";
-        message += new String(data) + "\n";
-        message += String.valueOf(data[0]) + "\n";
 
+        String message = "Read " + data.length + " bytes: \n";
+        for (int i = 0;i < data.length;i++) {
+            message += String.valueOf((int)data[i]) + "\n";
+        }
         mDumpTextView.append(message);
         //mScrollView.smoothScrollTo(0, mDumpTextView.getBottom());
+
+        if( data[0] == 1 ) sendGPSdata();
+        else if( data[0] == 2) sendOrientationData();
+
     }
 
 
